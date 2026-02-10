@@ -25,10 +25,19 @@ pub struct Config {
     pub worker_threads: Option<usize>,
     /// IP networks to whitelist from banning
     pub whitelists: Option<Vec<IpNet>>,
+    /// Action configurations, referenced by `source.rules[*].ban_action`
+    pub actions: HashMap<String, ActionConfig>,
     /// Preset variables for use in `source.rules[*].pattern` via `${var}` syntax
     pub presets: Option<Presets>,
     /// Log sources configuration
     pub sources: Vec<SourceConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ActionConfig {
+    pub init: Option<String>,
+    pub ban: String,
+    pub unban: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,15 +56,8 @@ pub struct RuleConfig {
     #[serde(with = "humantime_serde")]
     pub window: Duration,
     pub max_attempts: u32,
-    pub ban_action: BanAction,
+    pub ban_action: String,
     pub pattern: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub enum BanAction {
-    #[default]
-    #[serde(rename = "nftables-allports")]
-    NftablesAllPorts,
 }
 
 impl Config {
@@ -84,6 +86,27 @@ impl Config {
         for source in &self.sources {
             source.validate()?
         }
+        self.validate_rule_ban_action()?;
         Ok(self)
+    }
+
+    fn validate_rule_ban_action(&self) -> Result<()> {
+        for source in &self.sources {
+            let rules = match source {
+                SourceConfig::Journal { rules, .. } => rules,
+                SourceConfig::File { rules, .. } => rules,
+            };
+            for rule in rules {
+                if !self.actions.contains_key(&rule.ban_action) {
+                    // TODO error type???
+                    return Err(anyhow!(
+                        "undefined ban_action `{}` in rule `{}`",
+                        rule.ban_action,
+                        rule.name
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }

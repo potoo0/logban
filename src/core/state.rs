@@ -22,20 +22,20 @@ impl StateMachine {
         Self::default()
     }
 
-    /// Record an attempt for a rule and IP, returns true if it exceeds threshold
-    pub fn register_hit(&mut self, hit: &HitRecord, config: &RuleConfig) -> bool {
+    /// Record an attempt for a rule and IP, returns banned_until if it exceeds threshold
+    pub fn register_hit(&mut self, hit: &HitRecord, config: &RuleConfig) -> Option<OffsetDateTime> {
         let rule_entry = self.states.entry(config.name.clone()).or_default();
         let estimator =
             rule_entry.entry(hit.ip).or_insert_with(|| RateEstimator::new(config.window));
         estimator.push(hit.timestamp);
         info!(ip = %hit.ip, count = estimator.count(), threshold = config.max_attempts, "state update");
         if estimator.count() < config.max_attempts {
-            return false;
+            return None;
         }
 
         let banned_until = OffsetDateTime::now_utc() + config.ban_duration;
         self.active_bans.entry(hit.ip).or_default().insert(config.name.clone(), banned_until);
-        true
+        Some(banned_until)
     }
 
     /// Return and remove expired bans as (IpAddr, rule_name)

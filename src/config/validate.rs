@@ -63,8 +63,7 @@ impl Validate for SourceConfig {
 ///
 /// Rules:
 /// - The list of rules must not be empty
-/// - Rule names must be unique
-/// - Each rule must have a non-empty name and pattern
+/// - Each rule must have a non-empty unique name and pattern
 impl Validate for Vec<RuleConfig> {
     fn validate(&self) -> Result<(), ConfigError> {
         if self.is_empty() {

@@ -16,7 +16,11 @@ pub fn init(log_level: Option<String>) -> Result<()> {
         .or_else(|_| EnvFilter::try_from_default_env())
         .or_else(|_| EnvFilter::try_new(log_level))?;
 
-    let subscriber = fmt::layer().with_line_number(true).with_filter(env_filter);
+    let subscriber = fmt::layer()
+        .with_target(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_filter(env_filter);
     let registry = tracing_subscriber::registry().with(subscriber).with(ErrorLayer::default());
 
     #[cfg(debug_assertions)]

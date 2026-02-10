@@ -11,7 +11,7 @@ use crate::models::{HitRecord, LogEntry};
 /// `RuleMatcher` is responsible for matching log entries according to
 /// a configured rule and extracting IP addresses.
 pub struct RuleMatcher {
-    config: RuleConfig,
+    pub rule_name: String,
     pattern: Vec<Regex>,
 }
 
@@ -67,16 +67,12 @@ impl RuleMatcher {
         }
         None
     }
-
-    pub fn config(&self) -> &RuleConfig {
-        &self.config
-    }
 }
 
-impl TryFrom<RuleConfig> for RuleMatcher {
+impl TryFrom<&RuleConfig> for RuleMatcher {
     type Error = anyhow::Error;
 
-    fn try_from(config: RuleConfig) -> Result<Self, Self::Error> {
+    fn try_from(config: &RuleConfig) -> Result<Self, Self::Error> {
         let pattern = config
             .pattern
             .iter()
@@ -85,7 +81,7 @@ impl TryFrom<RuleConfig> for RuleMatcher {
                     .with_context(|| format!("Failed to compile regex for rule '{}'", config.name))
             })
             .collect::<Result<Vec<Regex>>>()?;
-        Ok(Self { config, pattern })
+        Ok(Self { rule_name: config.name.clone(), pattern })
     }
 }
 
@@ -94,7 +90,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::*;
-    use crate::config::BanAction;
 
     #[test]
     fn test_rule_matcher() {
@@ -111,10 +106,10 @@ mod tests {
             window: Default::default(),
             max_attempts: Default::default(),
             ban_duration: Default::default(),
-            ban_action: BanAction::NftablesAllPorts,
+            ban_action: "nftables-allports".to_string(),
         };
 
-        let matcher = RuleMatcher::try_from(rule_config).unwrap();
+        let matcher = RuleMatcher::try_from(&rule_config).unwrap();
         let cases = vec![
             ("password for 10.0.0.0 from", None),
             ("password for 1 from", None),

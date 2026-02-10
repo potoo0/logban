@@ -84,7 +84,7 @@ fn test_load_config_ok() {
     match &config.sources[0] {
         SourceConfig::Journal { rules, .. } => {
             assert_eq!(rules[0].ban_duration, Duration::from_secs(3600));
-            assert!(matches!(rules[0].ban_action, BanAction::NftablesAllPorts));
+            assert_eq!(rules[0].ban_action, "nftables-allports".to_string());
         }
         _ => panic!("Expected Journal source"),
     }
