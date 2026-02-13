@@ -47,10 +47,6 @@ fn main() -> anyhow::Result<()> {
                 (name.clone(), Action::from(action_cfg).with_dry_run(args.dry_run))
             })
             .collect();
-        for (name, action) in &actions {
-            let span = info_span!("action", name = name);
-            action.init().instrument(span).await?;
-        }
 
         // build engine
         let whitelist = cfg.whitelists.unwrap_or_default();

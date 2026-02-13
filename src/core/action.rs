@@ -1,20 +1,25 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use time::OffsetDateTime;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::config::{ActionConfig, RuleConfig};
 use crate::utils::string::expand_template;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Action {
-    pub init: Option<String>,
-    pub ban: String,
-    pub unban: Option<String>,
-    pub dry_run: bool,
+    init_cmd: Option<String>,
+    ban_cmd: String,
+    unban_cmd: Option<String>,
+    dry_run: bool,
+
+    init_lock: Mutex<()>,
+    initialized: AtomicBool,
 }
 
 impl Action {
@@ -36,32 +41,56 @@ impl Action {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(script = ?script, stdout = ?stdout, stderr = ?stderr, "script execution failed");
-            anyhow::bail!("execute script failed: {}", output.status)
+            bail!("execute script failed: {}", output.status)
         }
     }
 
     pub async fn init(&self) -> Result<()> {
+        if self.initialized.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        // Fast path: if already initialized, return immediately without acquiring the lock
         info!(dry_run = self.dry_run, "Initializing action");
 
-        let init_script = match &self.init {
+        // Check if init script is provided
+        let init_script = match &self.init_cmd {
             Some(script) if !script.is_empty() => script,
             _ => {
                 info!("init script is empty, skipping...");
+                self.initialized.store(true, Ordering::Release);
                 return Ok(());
             }
         };
 
-        self.run(init_script).await
+        // Acquire the lock to ensure only one initializer runs the init script
+        let _guard = self.init_lock.lock().await;
+        // double check
+        if self.initialized.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        match self.run(init_script).await {
+            Ok(_) => {
+                info!("action init finished");
+                self.initialized.store(true, Ordering::Release);
+                Ok(())
+            }
+            Err(e) => {
+                bail!("action init failed: {}", e)
+            }
+        }
     }
 
     pub async fn ban(&self, ip: IpAddr, _end: OffsetDateTime, rule: &RuleConfig) -> Result<()> {
+        self.init().await?;
         let ip_str = ip.to_string();
         let timeout_sec = rule.ban_duration.as_secs().to_string();
 
         let mut vars = HashMap::with_capacity(2);
         vars.insert("ip", ip_str.as_str());
         vars.insert("timeout_sec", timeout_sec.as_str());
-        let script = expand_template(self.ban.as_str(), &vars);
+        let script = expand_template(self.ban_cmd.as_str(), &vars);
         self.run(script.as_ref()).await?;
 
         info!(ip = ?ip_str, ban_duration = ?rule.ban_duration, "ban finished");
@@ -69,7 +98,7 @@ impl Action {
     }
 
     pub async fn unban(&self, ip: IpAddr, _rule: &RuleConfig) -> Result<()> {
-        let unban_script = match &self.unban {
+        let unban_script = match &self.unban_cmd {
             Some(script) if !script.is_empty() => script,
             _ => {
                 info!("unban script is empty, skipping unban for {}", ip);
@@ -77,6 +106,7 @@ impl Action {
             }
         };
 
+        self.init().await?;
         let ip_str = ip.to_string();
         let mut vars = HashMap::with_capacity(2);
         vars.insert("ip", ip_str.as_str());
@@ -90,6 +120,13 @@ impl Action {
 
 impl From<ActionConfig> for Action {
     fn from(cfg: ActionConfig) -> Self {
-        Self { init: cfg.init, ban: cfg.ban, unban: cfg.unban, dry_run: false }
+        Self {
+            init_cmd: cfg.init,
+            ban_cmd: cfg.ban,
+            unban_cmd: cfg.unban,
+            dry_run: false,
+            init_lock: Default::default(),
+            initialized: Default::default(),
+        }
     }
 }

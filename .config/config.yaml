@@ -17,16 +17,15 @@ actions:
       
       # Create the table and the set
       nft add table inet logban;
-      nft add set inet logban banned_ips '{ type addr; flags timeout; }';
+      nft add set inet logban banned_ipv4 '{ type ipv4_addr; flags timeout; }';
       
       # Create the INPUT chain and attach the filter hook
       nft add chain inet logban INPUT '{ type filter hook input priority 0; policy accept; }';
       
       # Add rules to block IPv4 and IPv6 addresses
-      nft add rule inet logban INPUT ip saddr @banned_ips drop;
-      nft add rule inet logban INPUT ip6 saddr @banned_ips drop;
-    ban: nft add element inet logban banned_ips { $ip timeout ${timeout_sec}s };
-    unban: nft delete element inet logban banned_ips { $ip };
+      nft add rule inet logban INPUT ip  saddr @banned_ipv4 drop;
+    ban: nft add element inet logban banned_ipv4 { $ip timeout ${timeout_sec}s };
+    # unban: nft delete element inet logban banned_ipv4 { $ip };
 
 sources:
   - type: journal
