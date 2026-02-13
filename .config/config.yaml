@@ -1,5 +1,6 @@
 # TODO add description of the config file
 worker_threads: 2
+db_file: /tmp/logban/logban.sqlite3
 
 whitelists:
   - 192.168.0.0/16

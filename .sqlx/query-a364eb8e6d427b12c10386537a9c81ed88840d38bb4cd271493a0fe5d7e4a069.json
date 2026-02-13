@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, ip, rule, banned_at, expire_at, is_active, unbanned_at\n            FROM bans\n            WHERE is_active = 1 AND expire_at <= ?\n            LIMIT ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "ip",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "rule",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "banned_at",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "expire_at",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_active",
+        "ordinal": 5,
+        "type_info": "Bool"
+      },
+      {
+        "name": "unbanned_at",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a364eb8e6d427b12c10386537a9c81ed88840d38bb4cd271493a0fe5d7e4a069"
+}

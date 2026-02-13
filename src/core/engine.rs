@@ -1,32 +1,41 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
 use futures::StreamExt;
 use ipnet::IpNet;
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{Instrument, error, info, info_span};
+use tracing::{Instrument, error, info, info_span, warn};
 
 use crate::config::RuleConfig;
 use crate::core::action::Action;
 use crate::core::matcher::RuleMatcher;
-use crate::core::state::StateMachine;
-use crate::models::LogEntry;
+use crate::core::state::State;
+use crate::core::store::Store;
+use crate::models::{BanEntity, LogEntry};
 use crate::source::LogSource;
+
+const CLEANUP_BATCH_SIZE: i32 = 1024;
 
 pub struct Engine {
     whitelist: Vec<IpNet>,
     actions: HashMap<String, Action>,
     rules: HashMap<String, RuleConfig>,
+    store: Store,
 
-    state: Arc<Mutex<StateMachine>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl Engine {
     pub fn new(
-        whitelist: Vec<IpNet>, actions: HashMap<String, Action>, rules: HashMap<String, RuleConfig>,
+        whitelist: Vec<IpNet>, actions: HashMap<String, Action>,
+        rules: HashMap<String, RuleConfig>, store: Store,
     ) -> Result<Self> {
-        Ok(Self { whitelist, state: Arc::new(Mutex::new(StateMachine::new())), actions, rules })
+        let state = Arc::new(Mutex::new(State::new()));
+        Ok(Self { whitelist, actions, rules, store, state })
     }
 
     pub async fn run_source(
@@ -63,6 +72,10 @@ impl Engine {
                         if let Err(e) = action.ban(hit.ip, end, rule).await {
                             error!("ban failed: {}", e);
                         }
+                        let record = BanEntity::new(hit.ip, rule.name.clone(), end);
+                        if let Err(e) = self.store.insert_active_ban(record).await {
+                            error!("failed to record active ban: {}", e);
+                        }
                     }
                 }
             }
@@ -71,17 +84,33 @@ impl Engine {
         }
     }
 
-    pub async fn run_cleanup_loop(&self) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+    async fn cleanup_expired_bans(&self, ts: i64) {
         loop {
-            interval.tick().await;
-            let mut state = self.state.lock().await;
-            let expired = state.drain_expired_bans();
+            let expired = match self.store.fetch_expired_bans(ts, CLEANUP_BATCH_SIZE).await {
+                Ok(rows) if !rows.is_empty() => rows,
+                Err(e) => {
+                    error!("failed to fetch expired bans: {}", e);
+                    return;
+                }
+                _ => return,
+            };
+            let count = expired.len();
+            let mut ids: Vec<i64> = Vec::with_capacity(count);
+            for entity in expired {
+                info!("unban: {} (expired)", entity.ip);
+                // ignore all errors, just try the best effort to unban and clean up expired records
+                if let Some(id) = entity.id {
+                    ids.push(id);
+                }
 
-            for (ip, rule_name) in expired {
-                info!("unban: {} (expired)", ip);
-
-                let rule = self.rules.get(&rule_name).unwrap();
+                let ip = match IpAddr::from_str(&entity.ip) {
+                    Ok(ip) => ip,
+                    Err(_) => {
+                        warn!("invalid IP address in ban record: {}", entity.ip);
+                        continue;
+                    }
+                };
+                let rule = self.rules.get(&entity.rule).unwrap();
                 let action = match self.actions.get(&rule.ban_action) {
                     Some(action) => action,
                     None => continue,
@@ -90,6 +119,24 @@ impl Engine {
                     error!("unban failed: {}", e);
                 }
             }
+
+            if let Err(e) = self.store.mark_bans_inactive(ts, ids).await {
+                warn!("failed to delete expired bans: {}", e);
+            }
+
+            // stop the loop if the batch is not full
+            if count < CLEANUP_BATCH_SIZE as usize {
+                return;
+            }
+        }
+    }
+
+    pub async fn run_cleanup_loop(&self) {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let now = OffsetDateTime::now_utc().unix_timestamp();
+            self.cleanup_expired_bans(now).await;
         }
     }
 }

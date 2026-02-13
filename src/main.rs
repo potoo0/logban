@@ -17,6 +17,7 @@ use crate::config::{Config, SourceConfig};
 use crate::core::action::Action;
 use crate::core::engine::Engine;
 use crate::core::matcher::RuleMatcher;
+use crate::core::store::Store;
 use crate::source::LogSource;
 use crate::source::file::FileSource;
 use crate::source::journal::JournalSource;
@@ -39,6 +40,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     runtime.block_on(async {
+        // init store
+        let store = Store::new(&cfg.db_file).await?;
         // init actions
         let actions: HashMap<String, Action> = cfg
             .actions
@@ -60,7 +63,7 @@ fn main() -> anyhow::Result<()> {
             })
             .map(|rule_cfg| (rule_cfg.name.clone(), rule_cfg))
             .collect();
-        let engine = Arc::new(Engine::new(whitelist, actions, rules)?);
+        let engine = Arc::new(Engine::new(whitelist, actions, rules, store)?);
         let engine_cleanup = Arc::clone(&engine);
         Builder::new().name("engine_cleanup").spawn(async move {
             engine_cleanup.run_cleanup_loop().await;

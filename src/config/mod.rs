@@ -23,6 +23,8 @@ type Presets = HashMap<String, String>;
 pub struct Config {
     /// Number of worker threads for processing log sources. Defaults to number of CPU cores.
     pub worker_threads: Option<usize>,
+    /// Path to the database file for storing active bans and history. The file will be created if it doesn't exist.
+    pub db_file: String,
     /// IP networks to whitelist from banning
     pub whitelists: Option<Vec<IpNet>>,
     /// Action configurations, referenced by `source.rules[*].ban_action`

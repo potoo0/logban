@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO bans (ip, rule, banned_at, expire_at, is_active, unbanned_at)\n            VALUES (?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "0940fcf0ed78fc9147e15b1d9cf6a5c048f53efb1e0d139ca11a185ca55559ec"
+}
