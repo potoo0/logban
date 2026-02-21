@@ -11,12 +11,12 @@ use std::sync::Arc;
 
 use clap::Parser;
 use tokio::task::Builder;
-use tracing::{Instrument, info, info_span};
+use tracing::{Instrument, debug, info, info_span};
 
 use crate::config::{Config, SourceConfig};
 use crate::core::action::Action;
 use crate::core::engine::Engine;
-use crate::core::matcher::RuleMatcher;
+use crate::core::rule::Rule;
 use crate::core::store::Store;
 use crate::source::LogSource;
 use crate::source::file::FileSource;
@@ -26,10 +26,11 @@ use crate::utils::string::truncate_tail;
 #[cfg(target_os = "linux")]
 fn main() -> anyhow::Result<()> {
     let args = cli::Args::parse();
-    logging::init(args.log_level)?;
-    info!("Loading config from: {}", args.config);
+    logging::init(args.log_level.clone())?;
+    debug!("starting logban with command line args: {:?}", args);
 
     let cfg = Config::from_path(&args.config)?;
+    debug!("loaded configuration: {:?}", cfg);
     let runtime = if let Some(worker_threads) = cfg.worker_threads {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(worker_threads)
@@ -40,9 +41,10 @@ fn main() -> anyhow::Result<()> {
     };
 
     runtime.block_on(async {
-        // init store
+        // Initialize store
         let store = Store::new(&cfg.db_file).await?;
-        // init actions
+
+        // Initialize actions
         let actions: HashMap<String, Action> = cfg
             .actions
             .into_iter()
@@ -51,28 +53,37 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-        // build engine
-        let whitelist = cfg.whitelists.unwrap_or_default();
+        // Build all rules from sources and index them by name
         let rules = cfg
             .sources
             .iter()
             .flat_map(|source| match source {
                 SourceConfig::Journal { rules, .. } | SourceConfig::File { rules, .. } => {
-                    rules.clone()
+                    rules.iter()
                 }
             })
-            .map(|rule_cfg| (rule_cfg.name.clone(), rule_cfg))
-            .collect();
-        let engine = Arc::new(Engine::new(whitelist, actions, rules, store)?);
-        let engine_cleanup = Arc::clone(&engine);
-        Builder::new().name("engine_cleanup").spawn(async move {
-            engine_cleanup.run_cleanup_loop().await;
-        })?;
+            .map(|rc| {
+                let rule = Rule::try_from((rc, &cfg.pattern_presets))?;
+                Ok((rule.name.clone(), rule))
+            })
+            .collect::<Result<HashMap<_, _>, anyhow::Error>>()?;
 
-        // run sources
+        // Create engine
+        let whitelist = cfg.whitelists.unwrap_or_default();
+        let engine = Arc::new(Engine::new(whitelist, actions, rules, store)?);
+
+        // Start cleanup task
+        {
+            let engine = Arc::clone(&engine);
+            Builder::new().name("engine_cleanup").spawn(async move {
+                engine.run_cleanup_loop().await;
+            })?;
+        }
+
+        // Start source processing tasks
         let mut tasks = Vec::new();
-        for source in cfg.sources {
-            let (source, rules) = match source {
+        for source_config in cfg.sources {
+            let (source, rule_configs) = match source_config {
                 SourceConfig::Journal { unit, rules } => {
                     let source: Box<dyn LogSource> = Box::new(JournalSource::new(unit)?);
                     (source, rules)
@@ -82,23 +93,19 @@ fn main() -> anyhow::Result<()> {
                     (source, rules)
                 }
             };
-            let engine_source = engine.clone();
-            let matchers =
-                rules.iter().map(RuleMatcher::try_from).collect::<Result<Vec<RuleMatcher>, _>>()?;
 
             let source_span = info_span!(
                 "source",
                 id = %truncate_tail(source.id(), 24),
                 backend = %source.backend(),
             );
+
+            let engine = engine.clone();
+            let source_rules: Vec<String> = rule_configs.iter().map(|c| c.name.clone()).collect();
             tasks.push(
                 Builder::new().name("run_source").spawn(
                     async move {
-                        // TODO : handle panic
-                        engine_source
-                            .run_source(source, &matchers)
-                            .await
-                            .expect("Source run failed");
+                        engine.run_source(source, source_rules).await.expect("Source run failed");
                     }
                     .instrument(source_span),
                 )?,

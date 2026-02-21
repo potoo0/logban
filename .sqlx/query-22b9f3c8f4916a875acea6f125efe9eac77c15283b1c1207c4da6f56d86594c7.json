@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, ip, rule, banned_at, expire_at, is_active, unbanned_at\n            FROM bans\n            WHERE is_active = 1 AND expire_at <= ?\n            LIMIT ?\n            ",
+  "query": "\n            SELECT id, ip, rule, banned_at, expire_at, is_active, unbanned_at\n            FROM bans\n            WHERE id is not null AND is_active = 1 AND expire_at <= ?\n            LIMIT ?\n            ",
   "describe": {
     "columns": [
       {
@@ -52,5 +52,5 @@
       true
     ]
   },
-  "hash": "a364eb8e6d427b12c10386537a9c81ed88840d38bb4cd271493a0fe5d7e4a069"
+  "hash": "22b9f3c8f4916a875acea6f125efe9eac77c15283b1c1207c4da6f56d86594c7"
 }

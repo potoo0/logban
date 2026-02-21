@@ -1,4 +1,5 @@
 use std::path::Path;
+
 use anyhow::Result;
 use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
@@ -6,6 +7,7 @@ use sqlx::sqlite::{
     SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
 };
 use tokio::fs::create_dir_all;
+
 use crate::models::BanEntity;
 
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -52,8 +54,8 @@ impl Store {
             record.is_active,
             record.unbanned_at
         )
-            .execute(&self.pool)
-            .await?;
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -64,14 +66,14 @@ impl Store {
             r#"
             SELECT id, ip, rule, banned_at, expire_at, is_active, unbanned_at
             FROM bans
-            WHERE is_active = 1 AND expire_at <= ?
+            WHERE id is not null AND is_active = 1 AND expire_at <= ?
             LIMIT ?
             "#,
             ts,
             batch_size
         )
-            .fetch_all(&self.pool)
-            .await?;
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows)
     }
@@ -109,7 +111,9 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
     use time::OffsetDateTime;
+
     use super::*;
 
     #[tokio::test]

@@ -1,26 +1,17 @@
 use thiserror::Error;
 
-// TODO improve error handling, e.g., add context to rule errors
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("Empty unit for source ? at ?")]
-    EmptyUnit,
-    #[error("Empty path for source ? at ?")]
-    EmptyPath,
-    #[error("Empty rule.name for source ? at ?")]
-    EmptyRuleName,
-    #[error("Duplicate rule.name `{0}` for source ? at ?")]
-    DuplicateRuleName(String),
-    #[error("Empty pattern for rule ? at ?")]
-    EmptyPattern,
-    #[error("Empty rules at ?")]
-    EmptyRules,
-    // #[error("Invalid max_attempts for rule ? at ?")]
-    // InvalidMaxAttempts,
-    #[error("Empty preset key `{0}`")]
-    EmptyPresetKey(String),
-    #[error("Empty preset value for key `{0}`")]
-    EmptyPresetValue(String),
-    #[error("Invalid preset key `{0}`, must be a valid identifier")]
-    InvalidPresetKey(String),
+    #[error("empty `{field}`{path_part}", path_part = fmt_path(path))]
+    EmptyField { field: &'static str, path: Option<String> },
+
+    #[error("duplicate `{field}`{path_part}, value: '{value}'", path_part = fmt_path(path))]
+    DuplicateValue { field: &'static str, path: Option<String>, value: String },
+
+    #[error("invalid `{field}`{path_part}, value: '{value}', reason: {reason}", path_part = fmt_path(path))]
+    InvalidValue { field: &'static str, path: Option<String>, value: String, reason: String },
+}
+
+fn fmt_path(path: &Option<String>) -> String {
+    path.as_deref().map(|p| format!(" at `{}`", p)).unwrap_or_default()
 }

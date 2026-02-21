@@ -24,15 +24,25 @@ macro_rules! assert_contains {
 fn test_load_config_missing_file() {
     // missing source field
     let err = Config::from_str("").err().unwrap();
-    assert_contains!(err.to_string(), "missing field `sources`");
+    assert_contains!(err.to_string(), "missing field `db_file`");
 
     // empty source field
-    let err = Config::from_str("sources: []").err().unwrap();
-    assert_contains!(err.to_string(), "`source` cannot be empty");
+    let err = Config::from_str(
+        r#"
+        db_file: /tmp/a.db
+        actions:
+        sources: []
+    "#,
+    )
+    .err()
+    .unwrap();
+    assert_contains!(err.to_string(), "empty `sources`");
 
     // empty unit in journal source
     let err = Config::from_str(
         r#"
+                db_file: /tmp/a.db
+                actions:
                 sources:
                   - type: journal
                     unit: ""
@@ -49,14 +59,17 @@ fn test_load_config_missing_file() {
     )
     .err()
     .unwrap();
-    // TODO
-    assert_contains!(err.to_string(), "unit");
+    assert_contains!(err.to_string(), "sources[0].unit");
 }
 
 #[test]
 fn test_load_config_ok() {
     let raw = r#"
             worker_threads: 2
+            db_file: /tmp/a.db
+            actions:
+              nftables-allports:
+                ban: echo ban all ports for {ip}
             whitelists:
               - 192.168.0.0/16
               - 101.102.103.104/32

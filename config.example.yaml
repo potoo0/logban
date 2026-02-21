@@ -1,0 +1,126 @@
+# Example configuration for logban. Adjust as needed and save as config.yaml
+# -------------------------------------------------------------------
+# Common - Duration Type
+# -------------------------------------------------------------------
+# Format:
+#   - Number followed by a time unit: s (seconds), m (minutes), h (hours), d (days)
+# Examples:
+#   30s   -> 30 seconds
+#   15m   -> 15 minutes
+#   1h    -> 1 hour
+#   2d    -> 2 days
+# -------------------------------------------------------------------
+
+# Number of worker threads to process log entries. Optional, defaults to number of CPU cores.
+worker_threads: 2
+# Path to the SQLite database file used to persist active bans.
+db_file: /var/lib/logban/logban.sqlite3
+
+# List of IP addresses or networks that should never be banned.
+whitelists:
+  - 192.168.0.0/16
+  - 10.0.0.0/8
+
+# Define actions to execute when banning/unbanning IPs.
+# Each action can include optional initialization, ban, and optional unban commands.
+actions:
+  nftables-allports:
+    # Optional, this will be executed once at first use,
+    # Script should ensure idempotency (e.g. by checking if the table/chain already exists).
+    init: |-
+      # Exit early if the table already exists
+      nft list table inet logban &>/dev/null && exit 0;
+      
+      # Create the table and the set
+      nft add table inet logban;
+      nft add set inet logban banned_ipv4 '{ type ipv4_addr; flags timeout; }';
+      
+      # Create the INPUT chain and attach the filter hook
+      nft add chain inet logban INPUT '{ type filter hook input priority 0; policy accept; }';
+      
+      # Add rules to block IPv4 and IPv6 addresses
+      nft add rule inet logban INPUT ip  saddr @banned_ipv4 drop;
+    # Command to ban an IP address, using a timeout in seconds
+    # Available variables:
+    # - $rule_name   (the name of the rule that triggered the ban, e.g. "ssh-login")
+    # - $ip          (the IP address to ban)
+    # - $timeout_sec (the ban duration in seconds)
+    ban: nft add element inet logban banned_ipv4 '{ $ip timeout ${timeout_sec}s }';
+    # Optional: command to unban an IP address after the ban duration expires
+    # NOTE:
+    # 1. This command is executed by the unban worker every 10 seconds.
+    # 2. Nftables will automatically remove expired bans if the "timeout" flag is configured,
+    #    so this is not strictly necessary
+    # 3. If the command fails or returns an error, it will be retried in the next cycle
+    #    until it succeeds.
+    # Available variables:
+    # - $rule_name   (the name of the rule that triggered the unban, e.g. "ssh-login")
+    # - $ip          (the IP address to unban)
+    unban: nft delete element inet logban banned_ipv4 '{ $ip }' 2>/dev/null || true;
+  remote-ban:
+    ban:   curl -X POST http://example.domain.com/ban/$rule_name,$ip,$timeout_sec
+    unban: curl -X POST http://example.domain.com/unban/$rule_name,$ip
+
+# Preset regex patterns for common log fields.
+# These can be reused in rule patterns via ${pattern_name}.
+# NOTE: capturing groups will be preserved when referenced,
+#       so prefer using non-capturing groups `(?:your_pattern)` to avoid unwanted captures.
+pattern_presets:
+  ip: '(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)'
+  date_time: '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'
+
+# Define sources of log entries and associated rules
+sources:
+  - type: journal
+    # NOTE: Only follows journal new log entries as they appear.
+    #       It does NOT read or process historical log entries.
+    unit: sshd.service
+    rules:
+      - name: ssh-login
+        # Maximum failed attempts before banning
+        max_attempts: 3
+        # Type: duration, time window to count failed attempts.
+        window: 1h
+        # Type: duration, duration to ban an offending IP
+        ban_duration: 7d
+        # Action to execute when banning an IP (must match a key in the "actions" section)
+        ban_action: nftables-allports
+        # Regex patterns to match log entries and extract IPs.
+        # Matching flow:
+        # 1. Start with the full log line as candidate content.
+        # 2. Apply each pattern in order:
+        #    - If it doesn't match, stop and skip the line.
+        #    - If a named capture group `ip` exists:
+        #        - Try to parse it as an IP.
+        #        - If parsing succeeds, return HitRecord immediately.
+        #        - If parsing fails, continue with the next pattern.
+        #    - Otherwise, take the last capture group as candidate for the next pattern.
+        # 3. If no IP is found after all patterns, skip the line.
+        pattern:
+          - '^Failed password for (?:invalid user )?\S+ from (?P<ip>$ip) port \d+ ssh2$$'
+  - type: file
+    # Path to the log file to monitor
+    # NOTE:
+    # - Only monitors this exact path. If the file is moved or renamed, monitoring stops.
+    # - Supports file truncation (log rotation) and re-creation.
+    path: /tmp/app.log
+    rules:
+      - name: test-app
+        max_attempts: 3
+        window: 10s
+        ban_duration: 5m
+        ban_action: nftables-allports
+        pattern:
+          - 'Failed password for (.*) from'
+          - '(?P<ip>$ip)'
+  - type: journal
+    unit: jupyterhub.service
+    rules:
+      - name: jupyterhub-login
+        max_attempts: 3
+        window: 1h
+        ban_duration: 7d
+        ban_action: remote-ban
+        pattern:
+          - '^\[W $date_time JupyterHub auth:\d+\]\s(.*): \[PAM Error'
+          - 'PAM Authentication failed \(.*@(?P<ip>$ip)\)$'

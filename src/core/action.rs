@@ -8,7 +8,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::config::{ActionConfig, RuleConfig};
+use crate::config::ActionConfig;
+use crate::core::rule::Rule;
 use crate::utils::string::expand_template;
 
 #[derive(Debug)]
@@ -82,12 +83,13 @@ impl Action {
         }
     }
 
-    pub async fn ban(&self, ip: IpAddr, _end: OffsetDateTime, rule: &RuleConfig) -> Result<()> {
+    pub async fn ban(&self, ip: IpAddr, _end: OffsetDateTime, rule: &Rule) -> Result<()> {
         self.init().await?;
         let ip_str = ip.to_string();
         let timeout_sec = rule.ban_duration.as_secs().to_string();
 
         let mut vars = HashMap::with_capacity(2);
+        vars.insert("rule_name", rule.name.as_str());
         vars.insert("ip", ip_str.as_str());
         vars.insert("timeout_sec", timeout_sec.as_str());
         let script = expand_template(self.ban_cmd.as_str(), &vars);
@@ -97,7 +99,7 @@ impl Action {
         Ok(())
     }
 
-    pub async fn unban(&self, ip: IpAddr, _rule: &RuleConfig) -> Result<()> {
+    pub async fn unban(&self, ip: IpAddr, rule: &Rule) -> Result<()> {
         let unban_script = match &self.unban_cmd {
             Some(script) if !script.is_empty() => script,
             _ => {
@@ -109,6 +111,7 @@ impl Action {
         self.init().await?;
         let ip_str = ip.to_string();
         let mut vars = HashMap::with_capacity(2);
+        vars.insert("rule_name", rule.name.as_str());
         vars.insert("ip", ip_str.as_str());
         let script = expand_template(unban_script, &vars);
         self.run(script.as_ref()).await?;

@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 
 use regex::Regex;
@@ -28,13 +28,17 @@ pub fn truncate_tail(s: &str, limit: usize) -> Cow<'_, str> {
 /// Expand variables in the template string using the provided variables map.
 /// Variables can be in the form of `$var` or `${var}`.
 /// If a variable is not found in the map, it remains unchanged in the output.
-pub fn expand_template<'a>(template: &'a str, vars: &HashMap<&str, &str>) -> Cow<'a, str> {
+pub fn expand_template<'a, K, V>(template: &'a str, vars: &HashMap<K, V>) -> Cow<'a, str>
+where
+    K: Borrow<str> + Eq + std::hash::Hash,
+    V: AsRef<str>,
+{
     let re = Regex::new(r"\$(\w+)|\$\{(\w+)}").unwrap();
 
     re.replace_all(template, |caps: &regex::Captures| {
         let key = caps.get(1).or(caps.get(2)).unwrap().as_str();
         match vars.get(key) {
-            Some(val) => Cow::Borrowed(*val),
+            Some(val) => Cow::Borrowed(val.as_ref()),
             None => Cow::Owned(caps[0].to_string()),
         }
     })

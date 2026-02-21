@@ -70,6 +70,10 @@ impl RateEstimator {
         self.estimated_count
     }
 
+    pub fn last_time(&self) -> Option<OffsetDateTime> {
+        self.last_time
+    }
+
     /// Reset the counter
     #[allow(dead_code)]
     pub fn reset(&mut self) {

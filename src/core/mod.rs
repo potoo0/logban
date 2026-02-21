@@ -1,6 +1,6 @@
 pub mod action;
 mod counter;
 pub mod engine;
-pub mod matcher;
+pub mod rule;
 pub mod state;
 pub mod store;

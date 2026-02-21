@@ -1,36 +1,38 @@
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use regex::Regex;
 use tracing::{Level, trace};
 
-use crate::config::RuleConfig;
+use crate::config::{Presets, RuleConfig};
 use crate::models::{HitRecord, LogEntry};
+use crate::utils::string::expand_template;
 
-/// `RuleMatcher` is responsible for matching log entries according to
-/// a configured rule and extracting IP addresses.
-pub struct RuleMatcher {
-    pub rule_name: String,
-    pattern: Vec<Regex>,
+#[derive(Debug, Clone)]
+pub struct Rule {
+    pub name: String,
+    pub ban_duration: Duration,
+    pub window: Duration,
+    pub max_attempts: u32,
+    pub ban_action: String,
+    pub pattern: Vec<Regex>,
 }
 
-impl RuleMatcher {
+impl Rule {
     /// Attempts to match a log entry and extract an IP according to the rule.
     ///
     /// Matching flow:
-    /// 1. Iterate over each regex in `pattern`.
-    /// 2. Apply the regex to the current input line.
-    /// 3. If a regex does not match, terminate immediately and return `None`.
-    /// 4. If a match is found:
-    ///     - If the named capture group `ip` exists, extract it as the candidate IP.
-    ///     - Otherwise, take the last capture group of the current regex as candidate content for
-    ///       the next pattern.
-    /// 5. Use the candidate content as input for the next regex and repeat the process.
-    /// 6. After all patterns are applied successfully:
-    ///     - Attempt to parse the candidate IP as a valid IP address.
-    ///     - If parsing succeeds, return `Some(HitRecord)` with the IP.
-    ///     - If parsing fails or no candidate exists, return `None`.
+    /// 1. Start with the full log line as candidate content.
+    /// 2. Apply each pattern in order:
+    ///    - If it doesn't match, stop and skip the line.
+    ///    - If a named capture group `ip` exists:
+    ///        - Try to parse it as an IP.
+    ///        - If parsing succeeds, return HitRecord immediately.
+    ///        - If parsing fails, continue with the next pattern.
+    ///    - Otherwise, take the last capture group as candidate for the next pattern.
+    /// 3. If no IP is found after all patterns, skip the line.
     ///
     /// Returns:
     /// - `Some(HitRecord)` if all patterns match and a valid IP is extracted.
@@ -69,20 +71,33 @@ impl RuleMatcher {
     }
 }
 
-impl TryFrom<&RuleConfig> for RuleMatcher {
-    type Error = anyhow::Error;
+impl TryFrom<(&RuleConfig, &Option<Presets>)> for Rule {
+    type Error = Error;
 
-    fn try_from(config: &RuleConfig) -> Result<Self, Self::Error> {
-        let pattern = config
+    fn try_from(value: (&RuleConfig, &Option<Presets>)) -> Result<Self, Self::Error> {
+        let pattern = value
+            .0
             .pattern
             .iter()
-            .map(|pat| {
-                Regex::new(pat)
-                    .with_context(|| format!("Failed to compile regex for rule '{}'", config.name))
-            })
+            .map(|pat| build_pattern(pat, value.1))
             .collect::<Result<Vec<Regex>>>()?;
-        Ok(Self { rule_name: config.name.clone(), pattern })
+        Ok(Self {
+            name: value.0.name.clone(),
+            ban_duration: value.0.ban_duration,
+            window: value.0.window,
+            max_attempts: value.0.max_attempts,
+            ban_action: value.0.ban_action.clone(),
+            pattern,
+        })
     }
+}
+
+fn build_pattern(pat: &str, presets: &Option<Presets>) -> Result<Regex> {
+    let expanded = match presets {
+        Some(vars) => expand_template(pat, vars),
+        None => pat.into(),
+    };
+    Regex::new(&expanded).with_context(|| format!("Failed to compile regex pattern '{}'", expanded))
 }
 
 #[cfg(test)]
@@ -100,7 +115,7 @@ mod tests {
         let rule_config = RuleConfig {
             name: "test_rule".to_string(),
             pattern: vec![
-                r"^Failed password for (.*) from".into(),
+                r"^Failed password for (?:.*) from (.*) port".into(),
                 r"^(?P<ip>\d{1,3}(?:\.\d{1,3}){3})$".into(),
             ],
             window: Default::default(),
@@ -108,21 +123,29 @@ mod tests {
             ban_duration: Default::default(),
             ban_action: "nftables-allports".to_string(),
         };
+        let presets = None;
 
-        let matcher = RuleMatcher::try_from(&rule_config).unwrap();
+        let rule = Rule::try_from((&rule_config, &presets)).unwrap();
         let cases = vec![
-            ("password for 10.0.0.0 from", None),
-            ("password for 1 from", None),
-            ("Failed password for 10.0.0 from", None),
-            ("Failed password for 10.0.0.0.0 from", None),
-            ("Failed password for 10.0.0.0 from", Some(IpAddr::from_str("10.0.0.0").unwrap())),
-            ("Failed password for 10.0.0.0 from 123", Some(IpAddr::from_str("10.0.0.0").unwrap())),
+            ("password for root from 10.0.0.0 port", None),
+            ("password for root from 1 port", None),
+            ("Failed password for root from 10.0.0 port", None),
+            ("Failed password for root from 10.0.0.0.0 port", None),
+            ("Failed password for root from 10.0.0.0", None),
+            (
+                "Failed password for root from 10.0.0.0 port",
+                Some(IpAddr::from_str("10.0.0.0").unwrap()),
+            ),
+            (
+                "Failed password for root from 10.0.0.0 port 42481",
+                Some(IpAddr::from_str("10.0.0.0").unwrap()),
+            ),
         ];
         for (idx, (msg, expected_ip)) in cases.into_iter().enumerate() {
             let entry = LogEntry { timestamp: OffsetDateTime::now_utc(), message: msg.to_string() };
             let span = tracing::info_span!("test_case", message_idx = idx);
             let _enter = span.enter();
-            let hit = matcher.match_entry(&entry);
+            let hit = rule.match_entry(&entry);
             assert_eq!(expected_ip, hit.as_ref().map(|h| h.ip));
         }
     }
