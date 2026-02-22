@@ -58,7 +58,7 @@ impl LogSource for FileSource {
                     Ok(n) if n > 0 => {
                         let entry = LogEntry {
                             timestamp: OffsetDateTime::now_utc(),
-                            message: st.line.trim().to_string(),
+                            message: st.line.trim().into(),
                         };
                         return Some((entry, st));
                     }
@@ -379,7 +379,7 @@ mod tests {
 
         // Verify reader got the correct lines
         for (actual, expected) in actual_lines.iter().zip(lines) {
-            assert_eq!(actual, expected);
+            assert_eq!(actual.as_ref(), expected);
         }
 
         Ok(())
@@ -490,7 +490,7 @@ mod tests {
             .await
             .expect("timeout waiting for new line")
             .expect("stream ended unexpectedly");
-        assert_eq!(entry.message, line);
+        assert_eq!(entry.message.as_ref(), line);
 
         Ok(())
     }

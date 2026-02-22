@@ -142,7 +142,7 @@ mod tests {
             ),
         ];
         for (idx, (msg, expected_ip)) in cases.into_iter().enumerate() {
-            let entry = LogEntry { timestamp: OffsetDateTime::now_utc(), message: msg.to_string() };
+            let entry = LogEntry { timestamp: OffsetDateTime::now_utc(), message: msg.into() };
             let span = tracing::info_span!("test_case", message_idx = idx);
             let _enter = span.enter();
             let hit = rule.match_entry(&entry);

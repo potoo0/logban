@@ -4,8 +4,6 @@ use std::sync::{Arc, LazyLock, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::LogSource;
-use crate::models::LogEntry;
 use anyhow::Result;
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -14,7 +12,10 @@ use systemd::journal::{Journal, JournalWaitResult};
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
+
+use super::LogSource;
+use crate::models::LogEntry;
 
 //
 // =====================
@@ -155,7 +156,7 @@ impl JournalHub {
             Some(v) => {
                 let bytes = v.data();
                 let value_bytes = &bytes["MESSAGE=".len()..];
-                str::from_utf8(value_bytes)?.to_owned()
+                str::from_utf8(value_bytes)?.into()
             }
             None => return Ok(()),
         };

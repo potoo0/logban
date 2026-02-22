@@ -3,11 +3,10 @@ use std::net::IpAddr;
 use sqlx::FromRow;
 use time::OffsetDateTime;
 
-// TODO optimize: LogEntry to avoid String allocation: use Cow<'a, str> or Bytes
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub timestamp: OffsetDateTime,
-    pub message: String,
+    pub message: Box<str>,
 }
 
 #[derive(Debug, Clone)]
