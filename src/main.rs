@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
         for source_config in cfg.sources {
             let (source, rule_configs) = match source_config {
                 SourceConfig::Journal { unit, rules } => {
-                    let source: Box<dyn LogSource> = Box::new(JournalSource::new(unit)?);
+                    let source: Box<dyn LogSource> = Box::new(JournalSource::new(&unit)?);
                     (source, rules)
                 }
                 SourceConfig::File { path, rules } => {

@@ -14,12 +14,13 @@ humantime-serde = "1.1.1"
 inotify = "0.11.0"
 ipnet = { version = "2", features = ["serde"] }
 regex = "1"
-sdjournal = { version = "0.1", features = ["tokio"] }
 serde = { version = "1.0", features = ["derive"] }
 sqlx = { version = "0.8", features = ["default", "sqlite", "runtime-tokio", "ipnet"] }
+systemd = "0.10"
 thiserror = "2"
 time = { version = "0.3.46", features = ["local-offset"] }
 tokio = { version = "1", features = ["full", "tracing"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
