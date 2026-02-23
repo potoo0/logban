@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  release:
+    types: [ created ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: ""
+
+    name: Release - ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.os }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsystemd-dev
+
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v1
+        env:
+          SQLX_OFFLINE: true
+        with:
+          target: ${{ matrix.platform.target }}
+          args: "--locked --release ${{ matrix.platform.features }}"
+          strip: true
+
+      - name: Publish artifacts and release
+        uses: houseabsolute/actions-rust-release@v0
+        with:
+          executable-name: logban
+          changes-file: ''
+          target: ${{ matrix.platform.target }}
