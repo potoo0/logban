@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use systemd::journal;
@@ -29,7 +29,9 @@ pub struct JournalSource {
 
 impl JournalSource {
     pub fn new(unit: &str) -> Result<Self> {
-        Ok(Self { unit: unit.to_string(), rx: None })
+        let hub = JournalHub::global();
+        let rx = Some(hub.subscribe(unit));
+        Ok(Self { unit: unit.to_string(), rx })
     }
 }
 
@@ -43,13 +45,18 @@ impl LogSource for JournalSource {
     }
 
     fn stream(&mut self) -> Result<BoxStream<'_, LogEntry>> {
-        if self.rx.is_none() {
-            let hub = JournalHub::global();
-            hub.start();
-            self.rx = Some(hub.subscribe(&self.unit));
-        }
+        let rx = self.rx.take().ok_or_else(|| anyhow!("stream already taken"))?;
 
-        Ok(ReceiverStream::new(self.rx.take().unwrap()).boxed())
+        // Start journal hub if not already started
+        JournalHub::global().start();
+
+        Ok(ReceiverStream::new(rx).boxed())
+    }
+}
+
+impl Drop for JournalSource {
+    fn drop(&mut self) {
+        JournalHub::global().unsubscribe(&self.unit);
     }
 }
 
@@ -92,13 +99,18 @@ impl JournalHub {
             .expect("failed to start journal thread");
     }
 
-    // Register a unit subscriber
+    /// Register a unit subscriber
     pub fn subscribe(&self, unit: &str) -> mpsc::Receiver<LogEntry> {
         let (tx, rx) = mpsc::channel(512);
 
         self.subscribers.write().unwrap().insert(unit.to_string(), tx);
 
         rx
+    }
+
+    /// Unregister a unit subscriber
+    pub fn unsubscribe(&self, unit: &str) {
+        self.subscribers.write().unwrap().remove(unit);
     }
 }
 
