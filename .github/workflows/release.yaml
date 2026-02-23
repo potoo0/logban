@@ -42,4 +42,7 @@ jobs:
         with:
           executable-name: logban
           changes-file: ''
+          extra-files: |
+            README.md
+            config.example.yaml
           target: ${{ matrix.platform.target }}
