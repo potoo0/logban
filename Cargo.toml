@@ -1,6 +1,6 @@
 [package]
 name = "logban"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 repository = "https://github.com/potoo0/logban"
 build = "build.rs"
