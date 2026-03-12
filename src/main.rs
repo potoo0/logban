@@ -42,7 +42,13 @@ fn main() -> anyhow::Result<()> {
 
     runtime.block_on(async {
         // Initialize store
-        let store = Store::new(&cfg.db_file).await?;
+        let store = if args.dry_run {
+            info!("Using in-memory store for dry-run mode");
+            Store::new_memory().await?
+        } else {
+            info!("Using file-based store at path: {}", cfg.db_file);
+            Store::new_file(&cfg.db_file).await?
+        };
 
         // Initialize actions
         let actions: HashMap<String, Action> = cfg

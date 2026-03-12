@@ -23,7 +23,7 @@ impl Store {
     /// - Sets WAL journal mode and NORMAL synchronous mode for safe and performant writes.
     /// - Enables incremental auto-vacuum to manage file size.
     /// - Runs all pending migrations to create/update tables as needed.
-    pub async fn new(filename: &str) -> Result<Self> {
+    pub async fn new_file(filename: &str) -> Result<Self> {
         // create directory if needed
         if let Some(parent) = Path::new(filename).parent() {
             create_dir_all(parent).await?;
@@ -35,9 +35,18 @@ impl Store {
             .synchronous(SqliteSynchronous::Normal)
             .auto_vacuum(SqliteAutoVacuum::Incremental);
 
-        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await?;
-        MIGRATOR.run(&pool).await?;
+        Self::from_opts(opts).await
+    }
 
+    pub async fn new_memory() -> Result<Self> {
+        let opts = SqliteConnectOptions::new().in_memory(true);
+        Self::from_opts(opts).await
+    }
+
+    async fn from_opts(opts: SqliteConnectOptions) -> Result<Self> {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await?;
+
+        MIGRATOR.run(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -117,12 +126,23 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_store() -> Result<()> {
+    async fn test_store_file() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let db_path = dir.path().join("logban.db");
         let db_path = db_path.to_string_lossy();
-        let store = Store::new(db_path.as_ref()).await?;
+        let store = Store::new_file(db_path.as_ref()).await?;
 
+        run_cases(store).await
+    }
+
+    #[tokio::test]
+    async fn test_store_memory() -> Result<()> {
+        let store = Store::new_memory().await?;
+
+        run_cases(store).await
+    }
+
+    async fn run_cases(store: Store) -> Result<()> {
         let now = OffsetDateTime::now_utc();
         let count: usize = 9;
         // insert expired bans
